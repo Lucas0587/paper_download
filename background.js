@@ -16,6 +16,7 @@ let queryKeywords = [];
 let currentDownloadStartTime = null;
 let stuckCheckInterval = null;
 let manualDownloadList = [];
+let queueLock = false;
 
 async function loadDownloadOptions() {
   try {
@@ -774,6 +775,8 @@ async function downloadNatureArticle(url, name, options = { downloadMain: true, 
     let tabListener = null;
     let timeoutId = null;
     let articleTabId = null;
+    let checkIntervalId = null;
+    let tabCreated = false;
     
     function cleanup() {
       console.log('  [Nature] 执行 cleanup()...');
@@ -805,9 +808,6 @@ async function downloadNatureArticle(url, name, options = { downloadMain: true, 
     }
     
     console.log('  [Nature] 步骤1: 提前注册事件监听器...');
-    
-    let checkIntervalId = null;
-    let tabCreated = false;
     
     // 提前注册事件监听器，防止错过事件
     tabListener = (tabId, info) => {
@@ -1601,7 +1601,7 @@ async function downloadFile(url, filename) {
   return new Promise((resolve) => {
     browser.downloads.download({
       url: url,
-      filename: '10.1021/' + filename,
+      filename: filename,
       saveAs: false
     }, (downloadId) => {
       if (browser.runtime.lastError) {
