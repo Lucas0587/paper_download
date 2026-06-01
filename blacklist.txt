@@ -1,0 +1,11 @@
+# Blacklist URLs - one per line
+# Lines starting with # are comments
+# URLs containing these strings will be skipped
+
+# ACS Publications
+https://pubs.acs.org/doi/10.1021/omv045i001_2026941
+https://pubs.acs.org/doi/10.1021/omv045i001_2026940
+https://pubs.acs.org/doi/10.1021/olv028i008_2047673
+https://pubs.acs.org/doi/10.1021/olv028i008_2047672
+
+# Add more URLs below...

@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {
+      width: 320px;
+      padding: 15px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    .btn-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 15px;
+    }
+    .btn {
+      padding: 10px 15px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-primary {
+      background: #0d6efd;
+      color: white;
+    }
+    .btn-primary:hover {
+      background: #0b5ed7;
+    }
+    .btn-success {
+      background: #198754;
+      color: white;
+    }
+    .btn-success:hover {
+      background: #157347;
+    }
+    .btn-secondary {
+      background: #6c757d;
+      color: white;
+    }
+    .btn-secondary:hover {
+      background: #5c636a;
+    }
+    .btn-warning {
+      background: #ffc107;
+      color: #212529;
+    }
+    .btn-warning:hover {
+      background: #e0a800;
+    }
+    .btn-danger {
+      background: #dc3545;
+      color: white;
+    }
+    .btn-danger:hover {
+      background: #bb2d3b;
+    }
+    .btn-dark {
+      background: #333;
+      color: white;
+    }
+    .btn-dark:hover {
+      background: #222;
+    }
+    .status {
+      font-size: 13px;
+      color: #666;
+      margin-bottom: 10px;
+      min-height: 20px;
+    }
+    .progress-bar {
+      height: 4px;
+      background: #eee;
+      border-radius: 2px;
+      overflow: hidden;
+      margin-bottom: 10px;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      background: #0d6efd;
+      width: 0%;
+      transition: width 0.3s;
+    }
+    .delay-section {
+      margin-top: 10px;
+      font-size: 13px;
+    }
+    .delay-section input {
+      width: 100%;
+      margin-top: 5px;
+    }
+    .divider {
+      border-top: 1px solid #eee;
+      margin: 15px 0;
+    }
+    .section-title {
+      font-weight: 600;
+      margin-bottom: 10px;
+      font-size: 14px;
+    }
+    .todo-list {
+      max-height: 200px;
+      overflow-y: auto;
+      border: 1px solid #eee;
+      border-radius: 6px;
+      padding: 8px;
+      margin-bottom: 10px;
+    }
+    .todo-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 8px;
+      margin-bottom: 4px;
+      background: #f8f9fa;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    .todo-item:last-child {
+      margin-bottom: 0;
+    }
+    .todo-item.pending {
+      border-left: 3px solid #ffc107;
+    }
+    .todo-item.downloading {
+      border-left: 3px solid #0d6efd;
+    }
+    .todo-item.completed {
+      border-left: 3px solid #198754;
+      opacity: 0.7;
+    }
+    .todo-url {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .todo-remove {
+      background: #dc3545;
+      color: white;
+      border: none;
+      border-radius: 3px;
+      padding: 2px 6px;
+      cursor: pointer;
+      font-size: 11px;
+    }
+    .todo-remove:hover {
+      background: #bb2d3b;
+    }
+    .todo-count {
+      font-size: 12px;
+      color: #666;
+      text-align: right;
+      margin-bottom: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="status" id="status">准备就绪</div>
+  <div class="progress-bar">
+    <div class="progress-bar-fill" id="progressBar"></div>
+  </div>
+  
+  <div class="section-title">快速下载</div>
+  <div class="btn-group">
+    <button class="btn btn-primary" id="acsAllBtn">ACS - 下载全部</button>
+    <button class="btn btn-secondary" id="acsSelectBtn">ACS - 选择下载</button>
+  </div>
+  
+  <div class="btn-group">
+    <button class="btn btn-dark" id="natureAllBtn">Nature - 下载全部</button>
+    <button class="btn btn-secondary" id="natureSelectBtn">Nature - 选择下载</button>
+  </div>
+  
+  <div class="btn-group">
+    <button class="btn btn-dark" id="rscAllBtn">RSC - 下载全部</button>
+    <button class="btn btn-secondary" id="rscSelectBtn">RSC - 选择下载</button>
+  </div>
+  
+  <div class="divider"></div>
+  
+  <div class="section-title">TODO列表管理</div>
+  <div class="todo-count" id="todoCount">0 个待下载</div>
+  <div class="todo-list" id="todoList"></div>
+  
+  <div class="btn-group">
+    <button class="btn btn-warning" id="storeBtn">加入TODO</button>
+    <button class="btn btn-success" id="startDownloadBtn">开始下载</button>
+    <button class="btn btn-danger" id="clearTodoBtn">清空TODO</button>
+  </div>
+  
+  <div class="divider"></div>
+  
+  <div class="section-title">手动下载列表</div>
+  <div class="todo-count" id="manualCount">0 个需要手动下载</div>
+  <div class="todo-list" id="manualList"></div>
+  
+  <div class="btn-group">
+    <button class="btn btn-danger" id="clearManualBtn">清空手动列表</button>
+  </div>
+  
+  <div class="btn-group" style="margin-top: 10px;">
+    <button class="btn btn-secondary" id="resetDownloadBtn">重置下载（卡住时使用）</button>
+  </div>
+  
+  <div class="delay-section" style="margin-bottom: 15px;">
+    <div style="margin-bottom: 8px;">下载选项：</div>
+    <label style="display: inline-block; margin-right: 15px; font-size: 13px;">
+      <input type="checkbox" id="downloadMainPdf" checked style="margin-right: 5px;"> 正文 PDF
+    </label>
+    <label style="display: inline-block; font-size: 13px;">
+      <input type="checkbox" id="downloadSI" checked style="margin-right: 5px;"> 支持信息 SI
+    </label>
+  </div>
+  
+  <div class="delay-section">
+    下载间隔: <span id="delayValue">5</span> 秒
+    <input type="range" id="delaySlider" min="3" max="15" value="5">
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>
