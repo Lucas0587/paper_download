@@ -556,6 +556,18 @@ async function downloadArticle(url, name, site, options = { downloadMain: true, 
         const waitAfterMain = typeof siteConfig.waitAfterMain === 'function' ? siteConfig.waitAfterMain() : siteConfig.waitAfterMain;
         const waitBetweenSI = typeof siteConfig.waitBetweenSI === 'function' ? siteConfig.waitBetweenSI() : siteConfig.waitBetweenSI;
         
+        // 自动滚动 2000-4000px
+        console.log(`  [${siteConfig.label}] → 执行自动滚动...`);
+        await browser.scripting.executeScript({
+          target: { tabId: articleTabId },
+          func: () => {
+            const scrollAmount = Math.floor(Math.random() * (4000 - 2000 + 1)) + 2000;
+            window.scrollBy({ top: scrollAmount, left: 0, behavior: 'smooth' });
+            return scrollAmount;
+          }
+        });
+        await delay(1000); // 等待滚动完成
+        
         console.log(`  [${siteConfig.label}] → 调用 showCountdown(${waitAfterLoad}, "${site}")...`);
         await showCountdown(waitAfterLoad, site);
         console.log(`  [${siteConfig.label}] ✓ showCountdown 完成`);
