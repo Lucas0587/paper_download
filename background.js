@@ -454,12 +454,61 @@ async function safeRemoveTab(tabId) {
   }
 }
 
-async function downloadACSArticle(url, name, options = { downloadMain: true, downloadSI: true }) {
+async function downloadArticle(url, name, site, options = { downloadMain: true, downloadSI: true }) {
+  const config = {
+    acs: {
+      label: 'ACS',
+      pdfExtractor: extractACSPdfUrl,
+      siExtractor: extractACSSupportingInfoUrls,
+      siExtractorWithRetry: extractACSSupportingInfoWithRetry,
+      siSuffix: (index) => `si_${String(index + 1).padStart(3, '0')}`,
+      waitAfterLoad: 6,
+      waitAfterMain: 3,
+      waitBetweenSI: 2,
+      timeout: 120000,
+      checkInterval: 1000
+    },
+    nature: {
+      label: 'Nature',
+      pdfExtractor: extractNaturePdfUrl,
+      siExtractor: extractNatureSupportingInfoUrls,
+      siExtractorWithRetry: null,
+      siSuffix: (index) => `${index + 1}`,
+      waitAfterLoad: 6,
+      waitAfterMain: 3,
+      waitBetweenSI: 5,
+      timeout: 120000,
+      checkInterval: 1000
+    },
+    rsc: {
+      label: 'RSC',
+      pdfExtractor: null,
+      siExtractor: null,
+      siExtractorWithRetry: null,
+      siSuffix: (index) => `${index + 1}`,
+      waitAfterLoad: 8,
+      waitAfterMain: 10,
+      waitBetweenSI: 60,
+      timeout: 60000,
+      checkInterval: 5000
+    }
+  };
+  
+  const siteConfig = config[site];
+  if (!siteConfig) {
+    console.error(`不支持的网站类型: ${site}`);
+    return false;
+  }
+  
   console.log('═══════════════════════════════════════════════════');
-  console.log('  [ACS] ▶ 开始处理:', name);
-  console.log('  [ACS] 详情页URL:', url);
-  console.log('  [ACS] 下载选项:', options);
+  console.log(`  [${siteConfig.label}] ▶ 开始处理:`, name);
+  console.log(`  [${siteConfig.label}] 详情页URL:`, url);
+  console.log(`  [${siteConfig.label}] 下载选项:`, options);
   console.log('═══════════════════════════════════════════════════');
+  
+  if (site === 'rsc') {
+    return downloadRscArticle(url, name, options);
+  }
   
   return new Promise((resolve) => {
     let success = false;
@@ -469,693 +518,247 @@ async function downloadACSArticle(url, name, options = { downloadMain: true, dow
     let checkIntervalId = null;
     
     function cleanup() {
-      console.log('  [ACS] 执行 cleanup()...');
+      console.log(`  [${siteConfig.label}] 执行 cleanup()...`);
       if (tabListener) {
         try {
           browser.tabs.onUpdated.removeListener(tabListener);
-          console.log('  [ACS] ✓ 监听器已移除');
+          console.log(`  [${siteConfig.label}] ✓ 监听器已移除`);
         } catch (e) {
-          console.warn('  [ACS] 移除监听器失败:', e);
+          console.warn(`  [${siteConfig.label}] 移除监听器失败:`, e);
         }
         tabListener = null;
       }
       if (timeoutId) {
         clearTimeout(timeoutId);
-        console.log('  [ACS] ✓ 超时定时器已清除');
+        console.log(`  [${siteConfig.label}] ✓ 超时定时器已清除`);
         timeoutId = null;
       }
       if (checkIntervalId) {
         clearInterval(checkIntervalId);
-        console.log('  [ACS] ✓ 主动检查定时器已清除');
+        console.log(`  [${siteConfig.label}] ✓ 主动检查定时器已清除`);
         checkIntervalId = null;
       }
       if (articleTabId) {
         safeRemoveTab(articleTabId).then(() => {
-          console.log('  [ACS] ✓ 标签页已关闭');
+          console.log(`  [${siteConfig.label}] ✓ 标签页已关闭`);
         }).catch(() => {});
         articleTabId = null;
       }
     }
     
-    console.log('  [ACS] 步骤1: 提前注册事件监听器...');
+    async function executeDownloadLogic() {
+      try {
+        console.log(`  [${siteConfig.label}] → 调用 showCountdown(${siteConfig.waitAfterLoad}, "${site}")...`);
+        await showCountdown(siteConfig.waitAfterLoad, site);
+        console.log(`  [${siteConfig.label}] ✓ showCountdown 完成`);
+        
+        console.log(`  [${siteConfig.label}] 检查标签页状态...`);
+        const tabExists = await checkTabExists(articleTabId);
+        if (!tabExists || shouldStop) {
+          console.log(`  [${siteConfig.label}] ⚠ 标签页已关闭或下载已停止`);
+          cleanup();
+          resolve(success);
+          return;
+        }
+        
+        console.log(`  [${siteConfig.label}] 步骤3: 提取主PDF链接...`);
+        console.log(`  [${siteConfig.label}] → browser.scripting.executeScript()`);
+        const pdfResult = await browser.scripting.executeScript({
+          target: { tabId: articleTabId },
+          function: siteConfig.pdfExtractor
+        });
+        
+        const pdfUrl = pdfResult[0].result;
+        console.log(`  [${siteConfig.label}] ✓ 脚本执行成功`);
+        console.log(`  [${siteConfig.label}]   主PDF链接:`, pdfUrl);
+        
+        let downloadedFiles = 0;
+        
+        if (pdfUrl && options.downloadMain) {
+          console.log(`  [${siteConfig.label}] → 调用 downloadFile():`, pdfUrl);
+          await downloadFile(pdfUrl, `${name}.pdf`);
+          downloadedFiles++;
+          console.log(`  [${siteConfig.label}] ✓ 主PDF下载完成`);
+          
+          console.log(`  [${siteConfig.label}] → 调用 showCountdown(${siteConfig.waitAfterMain}, "${site}")...`);
+          await showCountdown(siteConfig.waitAfterMain, site);
+          console.log(`  [${siteConfig.label}] ✓ 等待完成`);
+        } else if (!pdfUrl) {
+          console.log(`  [${siteConfig.label}] ⏭ 未找到主PDF！`);
+        } else {
+          console.log(`  [${siteConfig.label}] ⏭ 跳过主PDF下载（选项已关闭）`);
+        }
+        
+        console.log(`  [${siteConfig.label}] 检查标签页状态...`);
+        const stillExists = await checkTabExists(articleTabId);
+        if (!stillExists || shouldStop) {
+          console.log(`  [${siteConfig.label}] ⚠ 标签页已关闭或下载已停止`);
+          cleanup();
+          resolve(success);
+          return;
+        }
+        
+        console.log(`  [${siteConfig.label}] 步骤4: 提取支持信息...`);
+        let supportingInfoUrls = [];
+        
+        if (siteConfig.siExtractorWithRetry) {
+          console.log(`  [${siteConfig.label}] → ${siteConfig.siExtractorWithRetry.name}()`);
+          supportingInfoUrls = await siteConfig.siExtractorWithRetry(articleTabId);
+        } else {
+          console.log(`  [${siteConfig.label}] → browser.scripting.executeScript()`);
+          const supplResult = await browser.scripting.executeScript({
+            target: { tabId: articleTabId },
+            function: siteConfig.siExtractor
+          });
+          supportingInfoUrls = supplResult[0].result;
+        }
+        
+        console.log(`  [${siteConfig.label}] ✓ 支持信息提取完成`);
+        console.log(`  [${siteConfig.label}]   支持信息数量:`, supportingInfoUrls.length);
+        
+        if (options.downloadSI && supportingInfoUrls.length > 0) {
+          console.log(`  [${siteConfig.label}] 步骤5: 下载支持信息`);
+          for (let j = 0; j < supportingInfoUrls.length; j++) {
+            console.log(`  [${siteConfig.label}] 处理SI ${j + 1}/${supportingInfoUrls.length}`);
+            
+            const existsAgain = await checkTabExists(articleTabId);
+            if (!existsAgain || shouldStop) {
+              console.log(`  [${siteConfig.label}] ⚠ 标签页已关闭或下载已停止`);
+              break;
+            }
+            
+            const suffix = siteConfig.siSuffix(j);
+            console.log(`  [${siteConfig.label}] → 调用 downloadFile():`, supportingInfoUrls[j]);
+            await downloadFile(supportingInfoUrls[j], `${name}_${suffix}.pdf`);
+            downloadedFiles++;
+            console.log(`  [${siteConfig.label}] ✓ SI下载完成`);
+            
+            if (j < supportingInfoUrls.length - 1) {
+              console.log(`  [${siteConfig.label}] → 调用 showCountdown(${siteConfig.waitBetweenSI}, "${site}")...`);
+              await showCountdown(siteConfig.waitBetweenSI, site);
+              console.log(`  [${siteConfig.label}] ✓ 等待完成`);
+            }
+          }
+        } else if (!options.downloadSI) {
+          console.log(`  [${siteConfig.label}] ⏭ 跳过支持信息下载（选项已关闭）`);
+        } else {
+          console.log(`  [${siteConfig.label}] ⏭ 未找到支持信息`);
+        }
+        
+        success = downloadedFiles > 0;
+        console.log(`  [${siteConfig.label}] ═══════════════════════════════════════════`);
+        console.log(`  [${siteConfig.label}] ✓ 完成！共下载 ${downloadedFiles} 个文件`);
+        console.log(`  [${siteConfig.label}] ═══════════════════════════════════════════`);
+        
+        cleanup();
+        console.log(`  [${siteConfig.label}] → Promise resolve()`);
+        resolve(success);
+        
+      } catch (error) {
+        console.error(`  [${siteConfig.label}] ✗ 处理错误:`, error);
+        console.error(`  [${siteConfig.label}] ✗ 错误详情:`, error.stack);
+        cleanup();
+        resolve(success);
+      }
+    }
     
-    // 提前注册事件监听器，防止错过事件
+    console.log(`  [${siteConfig.label}] 步骤1: 提前注册事件监听器...`);
+    
     tabListener = (tabId, info) => {
-      console.log(`  [ACS] → tabs.onUpdated 事件: tabId=${tabId}(${typeof tabId}), articleTabId=${articleTabId}(${typeof articleTabId}), status=${info.status}`);
+      console.log(`  [${siteConfig.label}] → tabs.onUpdated 事件: tabId=${tabId}(${typeof tabId}), articleTabId=${articleTabId}(${typeof articleTabId}), status=${info.status}`);
       
       if (!articleTabId) {
-        console.log('  [ACS]   articleTabId 尚未设置，等待标签页创建...');
+        console.log(`  [${siteConfig.label}]   articleTabId 尚未设置，等待标签页创建...`);
         return;
       }
       
       const tabIdNum = Number(tabId);
       const articleTabIdNum = Number(articleTabId);
       
-      console.log(`  [ACS]   转换后: tabId=${tabIdNum}, articleTabId=${articleTabIdNum}, 相等=${tabIdNum === articleTabIdNum}`);
-      
-      if (tabIdNum !== articleTabIdNum) {
-        console.log('  [ACS]   忽略: 不是目标标签页');
-        return;
-      }
-      if (info.status !== 'complete') {
-        console.log('  [ACS]   忽略: 页面未完成加载');
+      if (tabIdNum !== articleTabIdNum || info.status !== 'complete') {
+        if (tabIdNum !== articleTabIdNum) {
+          console.log(`  [${siteConfig.label}]   忽略: 不是目标标签页`);
+        } else {
+          console.log(`  [${siteConfig.label}]   忽略: 页面未完成加载`);
+        }
         return;
       }
       
-      // 页面加载完成，清理定时器并执行后续操作
       if (checkIntervalId) {
         clearInterval(checkIntervalId);
         checkIntervalId = null;
       }
       
-      console.log('  [ACS] ✓ 通过事件监听器捕获到页面加载完成！');
-      console.log('  [ACS] 移除监听器...');
+      console.log(`  [${siteConfig.label}] ✓ 通过事件监听器捕获到页面加载完成！`);
       browser.tabs.onUpdated.removeListener(tabListener);
       tabListener = null;
       
-      console.log('  [ACS] 步骤2: 执行异步处理...');
-      (async () => {
-        try {
-          console.log('  [ACS] → 调用 showCountdown(6, "acs")...');
-          await showCountdown(6, 'acs');
-          console.log('  [ACS] ✓ showCountdown 完成');
-          
-          console.log('  [ACS] 检查标签页状态...');
-          const tabExists = await checkTabExists(articleTabId);
-          if (!tabExists || shouldStop) {
-            console.log('  [ACS] ⚠ 标签页已关闭或下载已停止');
-            cleanup();
-            resolve(success);
-            return;
-          }
-          
-          console.log('  [ACS] 步骤3: 提取主PDF链接...');
-          console.log('  [ACS] → browser.scripting.executeScript()');
-          const pdfResult = await browser.scripting.executeScript({
-            target: { tabId: articleTabId },
-            function: extractACSPdfUrl
-          });
-          
-          const pdfUrl = pdfResult[0].result;
-          console.log('  [ACS] ✓ 脚本执行成功');
-          console.log('  [ACS]   主PDF链接:', pdfUrl);
-          
-          let downloadedFiles = 0;
-          
-          if (pdfUrl && options.downloadMain) {
-            console.log('  [ACS] → 调用 downloadFile():', pdfUrl);
-            await downloadFile(pdfUrl, `${name}.pdf`);
-            downloadedFiles++;
-            console.log('  [ACS] ✓ 主PDF下载完成');
-            
-            console.log('  [ACS] → 调用 showCountdown(3, "acs")...');
-            await showCountdown(3, 'acs');
-            console.log('  [ACS] ✓ 等待完成');
-          } else if (!pdfUrl) {
-            console.log('  [ACS] ⏭ 未找到主PDF！');
-          } else {
-            console.log('  [ACS] ⏭ 跳过主PDF下载（选项已关闭）');
-          }
-          
-          console.log('  [ACS] 检查标签页状态...');
-          const stillExists = await checkTabExists(articleTabId);
-          if (!stillExists || shouldStop) {
-            console.log('  [ACS] ⚠ 标签页已关闭或下载已停止');
-            cleanup();
-            resolve(success);
-            return;
-          }
-          
-          console.log('  [ACS] 步骤4: 提取支持信息...');
-          console.log('  [ACS] → extractACSSupportingInfoWithRetry()');
-          const supportingInfoUrls = await extractACSSupportingInfoWithRetry(articleTabId);
-          console.log('  [ACS] ✓ 支持信息提取完成');
-          console.log('  [ACS]   支持信息数量:', supportingInfoUrls.length);
-          
-          if (options.downloadSI && supportingInfoUrls.length > 0) {
-            console.log('  [ACS] 步骤5: 下载支持信息');
-            for (let j = 0; j < supportingInfoUrls.length; j++) {
-              console.log(`  [ACS] 处理SI ${j + 1}/${supportingInfoUrls.length}`);
-              
-              const existsAgain = await checkTabExists(articleTabId);
-              if (!existsAgain || shouldStop) {
-                console.log('  [ACS] ⚠ 标签页已关闭或下载已停止');
-                break;
-              }
-              
-              const suffix = String(j + 1).padStart(3, '0');
-              console.log('  [ACS] → 调用 downloadFile():', supportingInfoUrls[j]);
-              await downloadFile(supportingInfoUrls[j], `${name}_si_${suffix}.pdf`);
-              downloadedFiles++;
-              console.log('  [ACS] ✓ SI下载完成');
-              
-              if (j < supportingInfoUrls.length - 1) {
-                console.log('  [ACS] → 调用 showCountdown(2, "acs")...');
-                await showCountdown(2, 'acs');
-                console.log('  [ACS] ✓ 等待完成');
-              }
-            }
-          } else if (!options.downloadSI) {
-            console.log('  [ACS] ⏭ 跳过支持信息下载（选项已关闭）');
-          } else {
-            console.log('  [ACS] ⏭ 未找到支持信息');
-          }
-          
-          success = downloadedFiles > 0;
-          console.log(`  [ACS] ═══════════════════════════════════════════`);
-          console.log(`  [ACS] ✓ 完成！共下载 ${downloadedFiles} 个文件`);
-          console.log(`  [ACS] ═══════════════════════════════════════════`);
-          
-          cleanup();
-          console.log('  [ACS] → Promise resolve()');
-          resolve(success);
-          
-        } catch (error) {
-          console.error('  [ACS] ✗ 处理错误:', error);
-          console.error('  [ACS] ✗ 错误详情:', error.stack);
-          cleanup();
-          resolve(success);
-        }
-      })().catch(e => console.error('  [ACS] ✗ async IIFE 错误:', e));
+      console.log(`  [${siteConfig.label}] 步骤2: 执行异步处理...`);
+      executeDownloadLogic().catch(e => console.error(`  [${siteConfig.label}] ✗ async IIFE 错误:`, e));
     };
     
-    console.log('  [ACS] 事件监听器已提前注册');
+    console.log(`  [${siteConfig.label}] 事件监听器已提前注册`);
     browser.tabs.onUpdated.addListener(tabListener);
     
-    console.log('  [ACS] 步骤1a: 创建后台标签页...');
-    console.log('  [ACS] → browser.tabs.create()');
+    console.log(`  [${siteConfig.label}] 步骤1a: 创建后台标签页...`);
     
     browser.tabs.create({ url: url, active: false }, (articleTab) => {
-      console.log('  [ACS] → browser.tabs.create() 回调触发, tab:', !!articleTab, articleTab?.id);
+      console.log(`  [${siteConfig.label}] → browser.tabs.create() 回调触发, tab:`, !!articleTab, articleTab?.id);
       
       if (!articleTab || !articleTab.id) {
-        console.error('  [ACS] ✗ 创建标签页失败！');
+        console.error(`  [${siteConfig.label}] ✗ 创建标签页失败！`);
         cleanup();
         resolve(success);
         return;
       }
       
       articleTabId = articleTab.id;
-      console.log('  [ACS] ✓ 标签页创建成功, ID:', articleTabId);
+      console.log(`  [${siteConfig.label}] ✓ 标签页创建成功, ID:`, articleTabId);
       
-      console.log('  [ACS] 设置超时定时器: 120000ms');
+      console.log(`  [${siteConfig.label}] 设置超时定时器: ${siteConfig.timeout}ms`);
       timeoutId = setTimeout(() => {
-        console.error('  [ACS] ✗ 页面加载超时！');
+        console.error(`  [${siteConfig.label}] ✗ 页面加载超时！`);
         cleanup();
         resolve(success);
-      }, 120000);
+      }, siteConfig.timeout);
       
-      // 添加主动查询检查，防止事件错过
-      console.log('  [ACS] 启动主动查询检查...');
+      console.log(`  [${siteConfig.label}] 启动主动查询检查...`);
       let checkCount = 0;
       checkIntervalId = setInterval(async () => {
         checkCount++;
-        console.log(`  [ACS] → 主动检查 #${checkCount}...`);
+        console.log(`  [${siteConfig.label}] → 主动检查 #${checkCount}...`);
         
         try {
           const tabInfo = await browser.tabs.get(articleTabId);
-          console.log(`  [ACS]   当前标签页状态: ${tabInfo.status}`);
+          console.log(`  [${siteConfig.label}]   当前标签页状态: ${tabInfo.status}`);
           
           if (tabInfo.status === 'complete') {
-            console.log('  [ACS] ✓ 通过主动查询检查到页面加载完成！');
+            console.log(`  [${siteConfig.label}] ✓ 通过主动查询检查到页面加载完成！`);
             clearInterval(checkIntervalId);
             checkIntervalId = null;
             
-            // 移除事件监听器
             if (tabListener) {
               browser.tabs.onUpdated.removeListener(tabListener);
               tabListener = null;
             }
             
-            // 执行相同的下载逻辑
-            console.log('  [ACS] 步骤2: 执行异步处理...');
-            (async () => {
-              try {
-                console.log('  [ACS] → 调用 showCountdown(6, "acs")...');
-                await showCountdown(6, 'acs');
-                console.log('  [ACS] ✓ showCountdown 完成');
-                
-                console.log('  [ACS] 检查标签页状态...');
-                const tabExists = await checkTabExists(articleTabId);
-                if (!tabExists || shouldStop) {
-                  console.log('  [ACS] ⚠ 标签页已关闭或下载已停止');
-                  cleanup();
-                  resolve(success);
-                  return;
-                }
-                
-                console.log('  [ACS] 步骤3: 提取主PDF链接...');
-                console.log('  [ACS] → browser.scripting.executeScript()');
-                const pdfResult = await browser.scripting.executeScript({
-                  target: { tabId: articleTabId },
-                  function: extractACSPdfUrl
-                });
-                
-                const pdfUrl = pdfResult[0].result;
-                console.log('  [ACS] ✓ 脚本执行成功');
-                console.log('  [ACS]   主PDF链接:', pdfUrl);
-                
-                let downloadedFiles = 0;
-                
-                if (pdfUrl && options.downloadMain) {
-                  console.log('  [ACS] → 调用 downloadFile():', pdfUrl);
-                  await downloadFile(pdfUrl, `${name}.pdf`);
-                  downloadedFiles++;
-                  console.log('  [ACS] ✓ 主PDF下载完成');
-                  
-                  console.log('  [ACS] → 调用 showCountdown(3, "acs")...');
-                  await showCountdown(3, 'acs');
-                  console.log('  [ACS] ✓ 等待完成');
-                } else if (!pdfUrl) {
-                  console.log('  [ACS] ⏭ 未找到主PDF！');
-                } else {
-                  console.log('  [ACS] ⏭ 跳过主PDF下载（选项已关闭）');
-                }
-                
-                console.log('  [ACS] 检查标签页状态...');
-                const stillExists = await checkTabExists(articleTabId);
-                if (!stillExists || shouldStop) {
-                  console.log('  [ACS] ⚠ 标签页已关闭或下载已停止');
-                  cleanup();
-                  resolve(success);
-                  return;
-                }
-                
-                console.log('  [ACS] 步骤4: 提取支持信息...');
-                console.log('  [ACS] → extractACSSupportingInfoWithRetry()');
-                const supportingInfoUrls = await extractACSSupportingInfoWithRetry(articleTabId);
-                console.log('  [ACS] ✓ 支持信息提取完成');
-                console.log('  [ACS]   支持信息数量:', supportingInfoUrls.length);
-                
-                if (options.downloadSI && supportingInfoUrls.length > 0) {
-                  console.log('  [ACS] 步骤5: 下载支持信息');
-                  for (let j = 0; j < supportingInfoUrls.length; j++) {
-                    console.log(`  [ACS] 处理SI ${j + 1}/${supportingInfoUrls.length}`);
-                    
-                    const existsAgain = await checkTabExists(articleTabId);
-                    if (!existsAgain || shouldStop) {
-                      console.log('  [ACS] ⚠ 标签页已关闭或下载已停止');
-                      break;
-                    }
-                    
-                    const suffix = String(j + 1).padStart(3, '0');
-                    console.log('  [ACS] → 调用 downloadFile():', supportingInfoUrls[j]);
-                    await downloadFile(supportingInfoUrls[j], `${name}_si_${suffix}.pdf`);
-                    downloadedFiles++;
-                    console.log('  [ACS] ✓ SI下载完成');
-                    
-                    if (j < supportingInfoUrls.length - 1) {
-                      console.log('  [ACS] → 调用 showCountdown(2, "acs")...');
-                      await showCountdown(2, 'acs');
-                      console.log('  [ACS] ✓ 等待完成');
-                    }
-                  }
-                } else if (!options.downloadSI) {
-                  console.log('  [ACS] ⏭ 跳过支持信息下载（选项已关闭）');
-                } else {
-                  console.log('  [ACS] ⏭ 未找到支持信息');
-                }
-                
-                success = downloadedFiles > 0;
-                console.log(`  [ACS] ═══════════════════════════════════════════`);
-                console.log(`  [ACS] ✓ 完成！共下载 ${downloadedFiles} 个文件`);
-                console.log(`  [ACS] ═══════════════════════════════════════════`);
-                
-                cleanup();
-                console.log('  [ACS] → Promise resolve()');
-                resolve(success);
-                
-              } catch (error) {
-                console.error('  [ACS] ✗ 处理错误:', error);
-                console.error('  [ACS] ✗ 错误详情:', error.stack);
-                cleanup();
-                resolve(success);
-              }
-            })().catch(e => console.error('  [ACS] ✗ async IIFE 错误:', e));
+            console.log(`  [${siteConfig.label}] 步骤2: 执行异步处理...`);
+            executeDownloadLogic().catch(e => console.error(`  [${siteConfig.label}] ✗ async IIFE 错误:`, e));
           }
         } catch (e) {
-          console.error('  [ACS] ✗ 主动检查失败:', e);
+          console.error(`  [${siteConfig.label}] ✗ 主动检查失败:`, e);
         }
-      }, 1000);
+      }, siteConfig.checkInterval);
     });
   });
 }
 
+async function downloadACSArticle(url, name, options = { downloadMain: true, downloadSI: true }) {
+  return downloadArticle(url, name, 'acs', options);
+}
+
 async function downloadNatureArticle(url, name, options = { downloadMain: true, downloadSI: true }) {
-  console.log('═══════════════════════════════════════════════════');
-  console.log('  [Nature] ▶ 开始处理:', name);
-  console.log('  [Nature] 详情页URL:', url);
-  console.log('  [Nature] 下载选项:', options);
-  console.log('═══════════════════════════════════════════════════');
-  
-  return new Promise((resolve) => {
-    let success = false;
-    let tabListener = null;
-    let timeoutId = null;
-    let articleTabId = null;
-    let checkIntervalId = null;
-    let tabCreated = false;
-    
-    function cleanup() {
-      console.log('  [Nature] 执行 cleanup()...');
-      if (tabListener) {
-        try {
-          browser.tabs.onUpdated.removeListener(tabListener);
-          console.log('  [Nature] ✓ 监听器已移除');
-        } catch (e) {
-          console.warn('  [Nature] 移除监听器失败:', e);
-        }
-        tabListener = null;
-      }
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-        console.log('  [Nature] ✓ 超时定时器已清除');
-        timeoutId = null;
-      }
-      if (checkIntervalId) {
-        clearInterval(checkIntervalId);
-        console.log('  [Nature] ✓ 主动检查定时器已清除');
-        checkIntervalId = null;
-      }
-      if (articleTabId) {
-        safeRemoveTab(articleTabId).then(() => {
-          console.log('  [Nature] ✓ 标签页已关闭');
-        }).catch(() => {});
-        articleTabId = null;
-      }
-    }
-    
-    console.log('  [Nature] 步骤1: 提前注册事件监听器...');
-    
-    // 提前注册事件监听器，防止错过事件
-    tabListener = (tabId, info) => {
-      console.log(`  [Nature] → tabs.onUpdated 事件: tabId=${tabId}(${typeof tabId}), articleTabId=${articleTabId}(${typeof articleTabId}), status=${info.status}`);
-      
-      if (!articleTabId) {
-        console.log('  [Nature]   articleTabId 尚未设置，等待标签页创建...');
-        return;
-      }
-      
-      const tabIdNum = Number(tabId);
-      const articleTabIdNum = Number(articleTabId);
-      
-      console.log(`  [Nature]   转换后: tabId=${tabIdNum}, articleTabId=${articleTabIdNum}, 相等=${tabIdNum === articleTabIdNum}`);
-      
-      if (tabIdNum !== articleTabIdNum) {
-        console.log('  [Nature]   忽略: 不是目标标签页');
-        return;
-      }
-      if (info.status !== 'complete') {
-        console.log('  [Nature]   忽略: 页面未完成加载');
-        return;
-      }
-      
-      // 页面加载完成，清理定时器并执行后续操作
-      if (checkIntervalId) {
-        clearInterval(checkIntervalId);
-        checkIntervalId = null;
-      }
-      
-      console.log('  [Nature] ✓ 通过事件监听器捕获到页面加载完成！');
-      console.log('  [Nature] 移除监听器...');
-      browser.tabs.onUpdated.removeListener(tabListener);
-      tabListener = null;
-      
-      console.log('  [Nature] 步骤2: 执行异步处理...');
-      (async () => {
-        try {
-          console.log('  [Nature] → 调用 showCountdown(6, "nature")...');
-          await showCountdown(6, 'nature');
-          console.log('  [Nature] ✓ showCountdown 完成');
-          
-          console.log('  [Nature] 检查标签页状态...');
-          const tabExists = await checkTabExists(articleTabId);
-          if (!tabExists || shouldStop) {
-            console.log('  [Nature] ⚠ 标签页已关闭或下载已停止');
-            cleanup();
-            resolve(success);
-            return;
-          }
-          
-          console.log('  [Nature] 步骤3: 提取主PDF链接...');
-          console.log('  [Nature] → browser.scripting.executeScript()');
-          const pdfResult = await browser.scripting.executeScript({
-            target: { tabId: articleTabId },
-            function: extractNaturePdfUrl
-          });
-          
-          const pdfUrl = pdfResult[0].result;
-          console.log('  [Nature] ✓ 脚本执行成功');
-          console.log('  [Nature]   主PDF链接:', pdfUrl);
-          
-          let downloadedFiles = 0;
-          
-          if (pdfUrl && options.downloadMain) {
-            console.log('  [Nature] → 调用 downloadFile():', pdfUrl);
-            await downloadFile(pdfUrl, `${name}.pdf`);
-            downloadedFiles++;
-            console.log('  [Nature] ✓ 主PDF下载完成');
-            
-            console.log('  [Nature] → 调用 showCountdown(3, "nature")...');
-            await showCountdown(3, 'nature');
-            console.log('  [Nature] ✓ 等待完成');
-          } else if (!pdfUrl) {
-            console.log('  [Nature] ⏭ 未找到主PDF！');
-          } else {
-            console.log('  [Nature] ⏭ 跳过主PDF下载（选项已关闭）');
-          }
-          
-          console.log('  [Nature] 检查标签页状态...');
-          const stillExists = await checkTabExists(articleTabId);
-          if (!stillExists || shouldStop) {
-            console.log('  [Nature] ⚠ 标签页已关闭或下载已停止');
-            cleanup();
-            resolve(success);
-            return;
-          }
-          
-          console.log('  [Nature] 步骤4: 提取支持信息...');
-          console.log('  [Nature] → browser.scripting.executeScript()');
-          const supplResult = await browser.scripting.executeScript({
-            target: { tabId: articleTabId },
-            function: extractNatureSupportingInfoUrls
-          });
-          
-          const supportingInfoUrls = supplResult[0].result;
-          console.log('  [Nature] ✓ 脚本执行成功');
-          console.log('  [Nature]   支持信息数量:', supportingInfoUrls.length);
-          
-          if (options.downloadSI && supportingInfoUrls.length > 0) {
-            console.log('  [Nature] 步骤5: 下载支持信息');
-            for (let j = 0; j < supportingInfoUrls.length; j++) {
-              console.log(`  [Nature] 处理SI ${j + 1}/${supportingInfoUrls.length}`);
-              
-              const existsAgain = await checkTabExists(articleTabId);
-              if (!existsAgain || shouldStop) {
-                console.log('  [Nature] ⚠ 标签页已关闭或下载已停止');
-                break;
-              }
-              
-              console.log('  [Nature] → 调用 downloadFile():', supportingInfoUrls[j]);
-              await downloadFile(supportingInfoUrls[j], `${name}_${j + 1}.pdf`);
-              downloadedFiles++;
-              console.log('  [Nature] ✓ SI下载完成');
-              
-              if (j < supportingInfoUrls.length - 1) {
-                console.log('  [Nature] → 调用 showCountdown(5, "nature")...');
-                await showCountdown(5, 'nature');
-                console.log('  [Nature] ✓ 等待完成');
-              }
-            }
-          } else if (!options.downloadSI) {
-            console.log('  [Nature] ⏭ 跳过支持信息下载（选项已关闭）');
-          } else {
-            console.log('  [Nature] ⏭ 未找到支持信息');
-          }
-          
-          success = downloadedFiles > 0;
-          console.log(`  [Nature] ═══════════════════════════════════════════`);
-          console.log(`  [Nature] ✓ 完成！共下载 ${downloadedFiles} 个文件`);
-          console.log(`  [Nature] ═══════════════════════════════════════════`);
-          
-          cleanup();
-          console.log('  [Nature] → Promise resolve()');
-          resolve(success);
-          
-        } catch (error) {
-          console.error('  [Nature] ✗ 处理错误:', error);
-          console.error('  [Nature] ✗ 错误详情:', error.stack);
-          cleanup();
-          resolve(success);
-        }
-      })().catch(e => console.error('  [Nature] ✗ async IIFE 错误:', e));
-    };
-    
-    console.log('  [Nature] 事件监听器已提前注册');
-    browser.tabs.onUpdated.addListener(tabListener);
-    
-    console.log('  [Nature] 步骤1a: 创建后台标签页...');
-    console.log('  [Nature] → browser.tabs.create()');
-    
-    browser.tabs.create({ url: url, active: false }, (articleTab) => {
-      console.log('  [Nature] → browser.tabs.create() 回调触发, tab:', !!articleTab, articleTab?.id);
-      
-      if (!articleTab || !articleTab.id) {
-        console.error('  [Nature] ✗ 创建标签页失败！');
-        cleanup();
-        resolve(success);
-        return;
-      }
-      
-      articleTabId = articleTab.id;
-      tabCreated = true;
-      console.log('  [Nature] ✓ 标签页创建成功, ID:', articleTabId);
-      
-      console.log('  [Nature] 设置超时定时器: 120000ms');
-      timeoutId = setTimeout(() => {
-        console.error('  [Nature] ✗ 页面加载超时！');
-        cleanup();
-        resolve(success);
-      }, 120000);
-      
-      // 添加主动查询检查，防止事件错过
-      console.log('  [Nature] 启动主动查询检查...');
-      let checkCount = 0;
-      checkIntervalId = setInterval(async () => {
-        checkCount++;
-        console.log(`  [Nature] → 主动检查 #${checkCount}...`);
-        
-        try {
-          const tabInfo = await browser.tabs.get(articleTabId);
-          console.log(`  [Nature]   当前标签页状态: ${tabInfo.status}`);
-          
-          if (tabInfo.status === 'complete') {
-            console.log('  [Nature] ✓ 通过主动查询检查到页面加载完成！');
-            clearInterval(checkIntervalId);
-            checkIntervalId = null;
-            
-            // 移除事件监听器
-            if (tabListener) {
-              browser.tabs.onUpdated.removeListener(tabListener);
-              tabListener = null;
-            }
-            
-            // 执行相同的下载逻辑
-            console.log('  [Nature] 步骤2: 执行异步处理...');
-            (async () => {
-              try {
-                console.log('  [Nature] → 调用 showCountdown(6, "nature")...');
-                await showCountdown(6, 'nature');
-                console.log('  [Nature] ✓ showCountdown 完成');
-                
-                console.log('  [Nature] 检查标签页状态...');
-                const tabExists = await checkTabExists(articleTabId);
-                if (!tabExists || shouldStop) {
-                  console.log('  [Nature] ⚠ 标签页已关闭或下载已停止');
-                  cleanup();
-                  resolve(success);
-                  return;
-                }
-                
-                console.log('  [Nature] 步骤3: 提取主PDF链接...');
-                console.log('  [Nature] → browser.scripting.executeScript()');
-                const pdfResult = await browser.scripting.executeScript({
-                  target: { tabId: articleTabId },
-                  function: extractNaturePdfUrl
-                });
-                
-                const pdfUrl = pdfResult[0].result;
-                console.log('  [Nature] ✓ 脚本执行成功');
-                console.log('  [Nature]   主PDF链接:', pdfUrl);
-                
-                let downloadedFiles = 0;
-                
-                if (pdfUrl && options.downloadMain) {
-                  console.log('  [Nature] → 调用 downloadFile():', pdfUrl);
-                  await downloadFile(pdfUrl, `${name}.pdf`);
-                  downloadedFiles++;
-                  console.log('  [Nature] ✓ 主PDF下载完成');
-                  
-                  console.log('  [Nature] → 调用 showCountdown(3, "nature")...');
-                  await showCountdown(3, 'nature');
-                  console.log('  [Nature] ✓ 等待完成');
-                } else if (!pdfUrl) {
-                  console.log('  [Nature] ⏭ 未找到主PDF！');
-                } else {
-                  console.log('  [Nature] ⏭ 跳过主PDF下载（选项已关闭）');
-                }
-                
-                console.log('  [Nature] 检查标签页状态...');
-                const stillExists = await checkTabExists(articleTabId);
-                if (!stillExists || shouldStop) {
-                  console.log('  [Nature] ⚠ 标签页已关闭或下载已停止');
-                  cleanup();
-                  resolve(success);
-                  return;
-                }
-                
-                console.log('  [Nature] 步骤4: 提取支持信息...');
-                console.log('  [Nature] → browser.scripting.executeScript()');
-                const supplResult = await browser.scripting.executeScript({
-                  target: { tabId: articleTabId },
-                  function: extractNatureSupportingInfoUrls
-                });
-                
-                const supportingInfoUrls = supplResult[0].result;
-                console.log('  [Nature] ✓ 脚本执行成功');
-                console.log('  [Nature]   支持信息数量:', supportingInfoUrls.length);
-                
-                if (options.downloadSI && supportingInfoUrls.length > 0) {
-                  console.log('  [Nature] 步骤5: 下载支持信息');
-                  for (let j = 0; j < supportingInfoUrls.length; j++) {
-                    console.log(`  [Nature] 处理SI ${j + 1}/${supportingInfoUrls.length}`);
-                    
-                    const existsAgain = await checkTabExists(articleTabId);
-                    if (!existsAgain || shouldStop) {
-                      console.log('  [Nature] ⚠ 标签页已关闭或下载已停止');
-                      break;
-                    }
-                    
-                    console.log('  [Nature] → 调用 downloadFile():', supportingInfoUrls[j]);
-                    await downloadFile(supportingInfoUrls[j], `${name}_${j + 1}.pdf`);
-                    downloadedFiles++;
-                    console.log('  [Nature] ✓ SI下载完成');
-                    
-                    if (j < supportingInfoUrls.length - 1) {
-                      console.log('  [Nature] → 调用 showCountdown(5, "nature")...');
-                      await showCountdown(5, 'nature');
-                      console.log('  [Nature] ✓ 等待完成');
-                    }
-                  }
-                } else if (!options.downloadSI) {
-                  console.log('  [Nature] ⏭ 跳过支持信息下载（选项已关闭）');
-                } else {
-                  console.log('  [Nature] ⏭ 未找到支持信息');
-                }
-                
-                success = downloadedFiles > 0;
-                console.log(`  [Nature] ═══════════════════════════════════════════`);
-                console.log(`  [Nature] ✓ 完成！共下载 ${downloadedFiles} 个文件`);
-                console.log(`  [Nature] ═══════════════════════════════════════════`);
-                
-                cleanup();
-                console.log('  [Nature] → Promise resolve()');
-                resolve(success);
-                
-              } catch (error) {
-                console.error('  [Nature] ✗ 处理错误:', error);
-                console.error('  [Nature] ✗ 错误详情:', error.stack);
-                cleanup();
-                resolve(success);
-              }
-            })().catch(e => console.error('  [Nature] ✗ async IIFE 错误:', e));
-          }
-        } catch (e) {
-          console.error('  [Nature] ✗ 主动检查失败:', e);
-        }
-      }, 1000);
-    });
-  });
+  return downloadArticle(url, name, 'nature', options);
 }
 
 async function extractACSSupportingInfoWithRetry(tabId) {
