@@ -454,6 +454,10 @@ async function safeRemoveTab(tabId) {
   }
 }
 
+function randomInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
 async function downloadArticle(url, name, site, options = { downloadMain: true, downloadSI: true }) {
   const config = {
     acs: {
@@ -462,9 +466,9 @@ async function downloadArticle(url, name, site, options = { downloadMain: true, 
       siExtractor: extractACSSupportingInfoUrls,
       siExtractorWithRetry: extractACSSupportingInfoWithRetry,
       siSuffix: (index) => `si_${String(index + 1).padStart(3, '0')}`,
-      waitAfterLoad: 6,
-      waitAfterMain: 3,
-      waitBetweenSI: 2,
+      waitAfterLoad: () => randomInt(5, 10),
+      waitAfterMain: () => randomInt(5, 10),
+      waitBetweenSI: () => randomInt(5, 10),
       timeout: 120000,
       checkInterval: 1000
     },
@@ -474,9 +478,9 @@ async function downloadArticle(url, name, site, options = { downloadMain: true, 
       siExtractor: extractNatureSupportingInfoUrls,
       siExtractorWithRetry: null,
       siSuffix: (index) => `${index + 1}`,
-      waitAfterLoad: 6,
-      waitAfterMain: 3,
-      waitBetweenSI: 5,
+      waitAfterLoad: () => randomInt(5, 10),
+      waitAfterMain: () => randomInt(5, 10),
+      waitBetweenSI: () => randomInt(5, 10),
       timeout: 120000,
       checkInterval: 1000
     },
@@ -548,8 +552,12 @@ async function downloadArticle(url, name, site, options = { downloadMain: true, 
     
     async function executeDownloadLogic() {
       try {
-        console.log(`  [${siteConfig.label}] → 调用 showCountdown(${siteConfig.waitAfterLoad}, "${site}")...`);
-        await showCountdown(siteConfig.waitAfterLoad, site);
+        const waitAfterLoad = typeof siteConfig.waitAfterLoad === 'function' ? siteConfig.waitAfterLoad() : siteConfig.waitAfterLoad;
+        const waitAfterMain = typeof siteConfig.waitAfterMain === 'function' ? siteConfig.waitAfterMain() : siteConfig.waitAfterMain;
+        const waitBetweenSI = typeof siteConfig.waitBetweenSI === 'function' ? siteConfig.waitBetweenSI() : siteConfig.waitBetweenSI;
+        
+        console.log(`  [${siteConfig.label}] → 调用 showCountdown(${waitAfterLoad}, "${site}")...`);
+        await showCountdown(waitAfterLoad, site);
         console.log(`  [${siteConfig.label}] ✓ showCountdown 完成`);
         
         console.log(`  [${siteConfig.label}] 检查标签页状态...`);
@@ -559,6 +567,20 @@ async function downloadArticle(url, name, site, options = { downloadMain: true, 
           cleanup();
           resolve(success);
           return;
+        }
+        
+        console.log(`  [${siteConfig.label}] 检查标签页URL...`);
+        try {
+          const currentTab = await browser.tabs.get(articleTabId);
+          console.log(`  [${siteConfig.label}] 当前URL:`, currentTab.url);
+          
+          if (site === 'acs' && !currentTab.url.includes('https://pubs.acs.org/')) {
+            console.log(`  [${siteConfig.label}] ⚠ 检测到可能被反爬，等待20秒自动重定向...`);
+            await delay(20000);
+            console.log(`  [${siteConfig.label}] 继续处理...`);
+          }
+        } catch (e) {
+          console.warn(`  [${siteConfig.label}] 获取标签页URL失败:`, e);
         }
         
         console.log(`  [${siteConfig.label}] 步骤3: 提取主PDF链接...`);
@@ -580,8 +602,8 @@ async function downloadArticle(url, name, site, options = { downloadMain: true, 
           downloadedFiles++;
           console.log(`  [${siteConfig.label}] ✓ 主PDF下载完成`);
           
-          console.log(`  [${siteConfig.label}] → 调用 showCountdown(${siteConfig.waitAfterMain}, "${site}")...`);
-          await showCountdown(siteConfig.waitAfterMain, site);
+          console.log(`  [${siteConfig.label}] → 调用 showCountdown(${waitAfterMain}, "${site}")...`);
+          await showCountdown(waitAfterMain, site);
           console.log(`  [${siteConfig.label}] ✓ 等待完成`);
         } else if (!pdfUrl) {
           console.log(`  [${siteConfig.label}] ⏭ 未找到主PDF！`);
@@ -634,8 +656,8 @@ async function downloadArticle(url, name, site, options = { downloadMain: true, 
             console.log(`  [${siteConfig.label}] ✓ SI下载完成`);
             
             if (j < supportingInfoUrls.length - 1) {
-              console.log(`  [${siteConfig.label}] → 调用 showCountdown(${siteConfig.waitBetweenSI}, "${site}")...`);
-              await showCountdown(siteConfig.waitBetweenSI, site);
+              console.log(`  [${siteConfig.label}] → 调用 showCountdown(${waitBetweenSI}, "${site}")...`);
+              await showCountdown(waitBetweenSI, site);
               console.log(`  [${siteConfig.label}] ✓ 等待完成`);
             }
           }
@@ -843,7 +865,6 @@ function extractNaturePdfUrl() {
       const href = link.getAttribute('href');
       if (href && href.includes('.pdf')) {
         pdfUrl = href.startsWith('http') ? href : 'https://www.nature.com' + href;
-        console.log('找到主 PDF（data-article-pdf）:', pdfUrl);
         break;
       }
     }
@@ -855,7 +876,6 @@ function extractNaturePdfUrl() {
       const href = link.getAttribute('href');
       if (href && href.includes('.pdf')) {
         pdfUrl = href.startsWith('http') ? href : 'https://www.nature.com' + href;
-        console.log('找到主 PDF（第一个 pdf 链接）:', pdfUrl);
         break;
       }
     }
@@ -889,7 +909,6 @@ function extractNatureSupportingInfoUrls() {
         const fullUrl = href.startsWith('http') ? href : 'https://www.nature.com' + href;
         if (!urls.includes(fullUrl)) {
           urls.push(fullUrl);
-          console.log('找到补充信息 PDF:', fullUrl);
         }
       }
     }

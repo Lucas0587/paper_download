@@ -316,7 +316,6 @@ function extractNaturePdfUrlOnPage() {
       const href = link.getAttribute('href');
       if (href && href.includes('.pdf')) {
         pdfUrl = href.startsWith('http') ? href : 'https://www.nature.com' + href;
-        console.log('找到主 PDF（data-article-pdf）:', pdfUrl);
         break;
       }
     }
@@ -328,7 +327,6 @@ function extractNaturePdfUrlOnPage() {
       const href = link.getAttribute('href');
       if (href && href.includes('.pdf')) {
         pdfUrl = href.startsWith('http') ? href : 'https://www.nature.com' + href;
-        console.log('找到主 PDF（第一个 pdf 链接）:', pdfUrl);
         break;
       }
     }
@@ -363,7 +361,6 @@ function extractNatureSupportingInfoUrlsOnPage() {
         const fullUrl = href.startsWith('http') ? href : 'https://www.nature.com' + href;
         if (!urls.includes(fullUrl)) {
           urls.push(fullUrl);
-          console.log('找到补充信息 PDF:', fullUrl);
         }
       }
     }
