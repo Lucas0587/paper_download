@@ -1601,7 +1601,7 @@ async function downloadFile(url, filename) {
   return new Promise((resolve) => {
     browser.downloads.download({
       url: url,
-      filename: filename,
+      filename: '10.1021/' + filename,
       saveAs: false
     }, (downloadId) => {
       if (browser.runtime.lastError) {
