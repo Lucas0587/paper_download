@@ -492,20 +492,32 @@ async function handleACSAll(delay) {
     progressBar.style.width = '70%';
     
     const options = getDownloadOptions();
-    browser.runtime.sendMessage({
-      action: 'start_download',
-      urls: filteredUrls.map(url => ({ url, name: getFileName(url), site: 'acs' })),
-      delay: delay,
-      type: 'acs',
-      options: options
-    });
     
-    status.textContent = `下载任务已发送！(${filteredUrls.length}篇)`;
-    progressBar.style.width = '100%';
-    
-    setTimeout(() => {
-      window.close();
-    }, 2000);
+    try {
+      const response = await browser.runtime.sendMessage({
+        action: 'start_download',
+        urls: filteredUrls.map(url => ({ url, name: getFileName(url), site: 'acs' })),
+        delay: delay,
+        type: 'acs',
+        options: options
+      });
+      
+      if (response && response.status === 'started') {
+        status.textContent = `下载任务已发送！(${response.total}篇)`;
+        progressBar.style.width = '100%';
+        
+        setTimeout(() => {
+          window.close();
+        }, 2000);
+      } else {
+        status.textContent = '发送下载任务失败';
+        progressBar.style.width = '0%';
+      }
+    } catch (error) {
+      console.error('发送消息失败:', error);
+      status.textContent = `发送失败: ${error.message}`;
+      progressBar.style.width = '0%';
+    }
     
   } catch (error) {
     console.error('Error in handleACSAll:', error);
@@ -614,18 +626,30 @@ async function handleNatureAll(delay) {
     progressBar.style.width = '70%';
     
     const options = getDownloadOptions();
-    browser.runtime.sendMessage({
-      action: 'start_nature_download',
-      urls: filteredUrls.map(url => ({ url, name: getFileName(url), site: 'nature' })),
-      options: options
-    });
     
-    status.textContent = `下载任务已发送！(${filteredUrls.length}篇)`;
-    progressBar.style.width = '100%';
-    
-    setTimeout(() => {
-      window.close();
-    }, 2000);
+    try {
+      const response = await browser.runtime.sendMessage({
+        action: 'start_nature_download',
+        urls: filteredUrls.map(url => ({ url, name: getFileName(url), site: 'nature' })),
+        options: options
+      });
+      
+      if (response && response.status === 'started') {
+        status.textContent = `下载任务已发送！(${response.total}篇)`;
+        progressBar.style.width = '100%';
+        
+        setTimeout(() => {
+          window.close();
+        }, 2000);
+      } else {
+        status.textContent = '发送下载任务失败';
+        progressBar.style.width = '0%';
+      }
+    } catch (error) {
+      console.error('发送消息失败:', error);
+      status.textContent = `发送失败: ${error.message}`;
+      progressBar.style.width = '0%';
+    }
     
   } catch (error) {
     console.error('Error in handleNatureAll:', error);
@@ -734,18 +758,30 @@ async function handleRscAll(delay) {
     progressBar.style.width = '70%';
     
     const options = getDownloadOptions();
-    browser.runtime.sendMessage({
-      action: 'start_rsc_download',
-      urls: filteredUrls.map(url => ({ url, name: getFileName(url), site: 'rsc' })),
-      options: options
-    });
     
-    status.textContent = `下载任务已发送！(${filteredUrls.length}篇)`;
-    progressBar.style.width = '100%';
-    
-    setTimeout(() => {
-      window.close();
-    }, 2000);
+    try {
+      const response = await browser.runtime.sendMessage({
+        action: 'start_rsc_download',
+        urls: filteredUrls.map(url => ({ url, name: getFileName(url), site: 'rsc' })),
+        options: options
+      });
+      
+      if (response && response.status === 'started') {
+        status.textContent = `下载任务已发送！(${response.total}篇)`;
+        progressBar.style.width = '100%';
+        
+        setTimeout(() => {
+          window.close();
+        }, 2000);
+      } else {
+        status.textContent = '发送下载任务失败';
+        progressBar.style.width = '0%';
+      }
+    } catch (error) {
+      console.error('发送消息失败:', error);
+      status.textContent = `发送失败: ${error.message}`;
+      progressBar.style.width = '0%';
+    }
     
   } catch (error) {
     console.error('Error in handleRscAll:', error);

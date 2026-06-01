@@ -17,6 +17,7 @@ let currentDownloadStartTime = null;
 let stuckCheckInterval = null;
 let manualDownloadList = [];
 let queueLock = false;
+let isInitialized = false;
 
 async function loadDownloadOptions() {
   try {
@@ -62,10 +63,23 @@ async function initQueryKeywords() {
   }
 }
 
-initQueryKeywords();
-loadManualDownloadList();
+async function initExtension() {
+  console.log('========== 初始化扩展 ==========');
+  await initQueryKeywords();
+  await loadManualDownloadList();
+  isInitialized = true;
+  console.log('========== 初始化完成 ==========');
+}
+
+initExtension();
 
 browser.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
+  if (!isInitialized && message.action !== 'load_query') {
+    console.log('扩展尚未初始化完成，等待中...');
+    while (!isInitialized) {
+      await delay(100);
+    }
+  }
   if (message.action === 'start_download') {
     await loadDownloadOptions();
     if (message.options) {
@@ -75,7 +89,14 @@ browser.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
     console.log('添加文章:', message.urls.map(u => u.name));
     console.log('Download options:', downloadOptions);
     const acsItems = message.urls.map(u => ({...u, site: 'acs'}));
+    
+    while (queueLock) {
+      await delay(100);
+    }
+    queueLock = true;
     downloadQueue = [...downloadQueue, ...acsItems];
+    queueLock = false;
+    
     currentDelay = (message.delay || 5) * 1000;
     fromTodo = message.fromTodo || false;
     shouldStop = false;
@@ -86,6 +107,7 @@ browser.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
       processQueue();
     }
     sendResponse({ status: 'started', total: downloadQueue.length });
+    return true;
   } else if (message.action === 'start_nature_download') {
     await loadDownloadOptions();
     if (message.options) {
@@ -95,7 +117,14 @@ browser.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
     console.log('添加文章:', message.urls.map(u => u.name));
     console.log('Download options:', downloadOptions);
     const natureItems = message.urls.map(u => ({...u, site: 'nature'}));
+    
+    while (queueLock) {
+      await delay(100);
+    }
+    queueLock = true;
     downloadQueue = [...downloadQueue, ...natureItems];
+    queueLock = false;
+    
     currentDelay = (message.delay || 5) * 1000;
     fromTodo = message.fromTodo || false;
     shouldStop = false;
@@ -106,6 +135,7 @@ browser.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
       processQueue();
     }
     sendResponse({ status: 'started', total: downloadQueue.length });
+    return true;
   } else if (message.action === 'start_rsc_download') {
     await loadDownloadOptions();
     if (message.options) {
@@ -115,7 +145,14 @@ browser.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
     console.log('添加文章:', message.urls.map(u => u.name));
     console.log('Download options:', downloadOptions);
     const rscItems = message.urls.map(u => ({...u, site: 'rsc'}));
+    
+    while (queueLock) {
+      await delay(100);
+    }
+    queueLock = true;
     downloadQueue = [...downloadQueue, ...rscItems];
+    queueLock = false;
+    
     currentDelay = (message.delay || 5) * 1000;
     fromTodo = message.fromTodo || false;
     shouldStop = false;
@@ -126,6 +163,7 @@ browser.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
       processQueue();
     }
     sendResponse({ status: 'started', total: downloadQueue.length });
+    return true;
   } else if (message.action === 'download_file_direct') {
     downloadFile(message.url, message.filename);
     sendResponse({ status: 'downloading' });
