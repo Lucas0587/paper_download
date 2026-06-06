@@ -71,6 +71,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('resetDownloadBtn').addEventListener('click', async () => {
     await resetDownload();
   });
+  
+  document.getElementById('addDoiBtn').addEventListener('click', async () => {
+    await addDoiToTodo();
+  });
+  
+  // 支持回车键添加
+  document.getElementById('doiInput').addEventListener('keypress', async (e) => {
+    if (e.key === 'Enter') {
+      await addDoiToTodo();
+    }
+  });
 });
 
 async function loadBlacklist() {
@@ -89,6 +100,122 @@ async function loadBlacklist() {
 
 function isBlacklisted(url) {
   return blacklist.some(entry => url.includes(entry));
+}
+
+function doiToUrl(doi) {
+  doi = doi.trim();
+  if (!doi) return null;
+  
+  // 移除可能包含的URL前缀
+  if (doi.startsWith('https://doi.org/')) {
+    doi = doi.replace('https://doi.org/', '');
+  } else if (doi.startsWith('http://doi.org/')) {
+    doi = doi.replace('http://doi.org/', '');
+  } else if (doi.startsWith('doi:')) {
+    doi = doi.replace('doi:', '');
+  }
+  
+  if (!doi.startsWith('10.')) {
+    return null; // 不是有效的DOI格式
+  }
+  
+  let url = null;
+  let site = null;
+  
+  if (doi.startsWith('10.1021/')) {
+    // ACS
+    url = `https://pubs.acs.org/doi/${doi}`;
+    site = 'acs';
+  } else if (doi.startsWith('10.1038/') || doi.startsWith('10.1057/') || doi.startsWith('10.1007/')) {
+    // Nature (包括Springer Nature旗下期刊)
+    url = `https://doi.org/${doi}`;
+    site = 'nature';
+  } else if (doi.startsWith('10.1039/')) {
+    // RSC
+    url = `https://doi.org/${doi}`;
+    site = 'rsc';
+  } else {
+    // 其他期刊暂时使用通用doi.org链接，后续可以扩展
+    url = `https://doi.org/${doi}`;
+    // 默认先尝试Nature，不对的话可能需要用户手动处理
+    site = 'nature';
+  }
+  
+  return { url, site, doi };
+}
+
+function getDoiFileName(doi) {
+  const parts = doi.split('/');
+  // 取最后一个部分作为文件名
+  const lastPart = parts[parts.length - 1].replace(/[^a-zA-Z0-9.-]/g, '-');
+  return lastPart || `doi-${Date.now()}`;
+}
+
+async function addDoiToTodo() {
+  const status = document.getElementById('status');
+  const progressBar = document.getElementById('progressBar');
+  const doiInput = document.getElementById('doiInput');
+  
+  const doi = doiInput.value.trim();
+  
+  if (!doi) {
+    status.textContent = '请输入DOI号';
+    progressBar.style.width = '0%';
+    return;
+  }
+  
+  status.textContent = '解析DOI...';
+  progressBar.style.width = '30%';
+  
+  try {
+    const result = doiToUrl(doi);
+    
+    if (!result) {
+      status.textContent = '无效的DOI格式';
+      progressBar.style.width = '0%';
+      return;
+    }
+    
+    const { url, site, doi: cleanDoi } = result;
+    const name = getDoiFileName(cleanDoi);
+    
+    // 检查是否已在TODO列表中
+    const todoList = await getTodoList();
+    const alreadyExists = todoList.some(item => item.url === url);
+    
+    if (alreadyExists) {
+      status.textContent = '该文章已在TODO列表中';
+      progressBar.style.width = '0%';
+      return;
+    }
+    
+    // 添加到TODO列表
+    todoList.push({
+      url,
+      name,
+      site,
+      status: 'pending',
+      addedAt: Date.now()
+    });
+    
+    await saveTodoList(todoList);
+    
+    // 清空输入框
+    doiInput.value = '';
+    
+    status.textContent = `已添加到TODO: ${name}`;
+    progressBar.style.width = '100%';
+    
+    setTimeout(() => {
+      status.textContent = '准备就绪';
+      progressBar.style.width = '0%';
+    }, 2000);
+    
+  } catch (error) {
+    console.error('添加DOI失败:', error);
+    status.textContent = `添加失败: ${error.message}`;
+    progressBar.style.width = '0%';
+  }
 }
 
 async function getTodoList() {
